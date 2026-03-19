@@ -1,7 +1,7 @@
 import math
 import time
 from dataclasses import dataclass, replace
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 import torch
 from transformers import AutoTokenizer, LlamaForCausalLM
@@ -15,7 +15,7 @@ from ..nn.vibevoice import VibeVoiceDiffusionHead, VibeVoiceDiffusionHeadConfig
 from ..utils.gray_code import decode_gray_code_to_time
 from ..utils.text import normalize_text as normalize_text_fn
 from .acoustic_spkr_verf import AcousticSpkrVerf
-from .decoder import Decoder, DecoderConfig
+from .decoder import Decoder, DecoderConfig, StreamingDecoder
 from .encoder import Encoder, EncoderConfig, EncoderOutput
 
 
@@ -653,6 +653,8 @@ class TadaForCausalLM(LlamaForCausalLM):
         use_text_in_prompt: bool = False,
         verbose: bool = False,
         return_logits: bool = False,
+        on_token_ready: Callable[[torch.Tensor, int, int], None] | None = None,
+        on_token_ready_offset: int = 0,
         **kwargs,
     ) -> SyncTokGenerationOutput:
         start_header_id = self.tokenizer.convert_tokens_to_ids("<|start_header_id|>")
@@ -1099,6 +1101,13 @@ class TadaForCausalLM(LlamaForCausalLM):
                     time_len_after = predicted_time_len_after
                 all_time_before.append(time_len_before)
                 last_time_before = time_len_before
+
+                # Fire streaming callback for predicted (non-prompt) tokens
+                if on_token_ready is not None and acoustic_feat_type == "predicted":
+                    token_idx = len(all_acoustic_features) - 1  # 0-based index into all_acoustic_features
+                    if token_idx >= on_token_ready_offset:
+                        on_token_ready(acoustic_features, time_len_before, token_idx - on_token_ready_offset)
+
             model_kwargs = self._update_model_kwargs_for_generation(outputs, model_kwargs)
             if log_time:
                 if torch.cuda.is_available():
@@ -1201,6 +1210,8 @@ class TadaForCausalLM(LlamaForCausalLM):
         use_text_in_prompt: bool = False,
         normalize_text: bool = True,
         verbose: bool = False,
+        on_audio_chunk: Callable[[torch.Tensor, int], None] | None = None,
+        streaming_cnn_window_size: int = 100,
     ) -> GenerationOutput:
         # Auto-cast prompt tensors to model dtype (e.g. fp32 prompt + bf16 model)
         model_dtype = next(self.parameters()).dtype
@@ -1212,14 +1223,21 @@ class TadaForCausalLM(LlamaForCausalLM):
         if isinstance(text, str):
             text = [text]
         text = [normalize_text_fn(t) if normalize_text else t for t in text]
-        input_ids = [
-            self.tokenizer.encode(prompt.text[0] + text[i])[prompt.text_tokens_len[i] :] for i in range(len(text))
-        ]
         audio_feat_len = (prompt.audio_len / prompt.sample_rate * 50).ceil().long()
 
+        # Joint encoding with a space separator ensures correct BPE tokenization
+        # at the prompt/gen boundary. Without a space, BPE merges boundary chars
+        # (e.g., ".Hello" -> ".H"+"ello", losing the "H" from "Hello").
+        # The space ensures the first generation token is tokenized correctly.
+        prompt_text = prompt.text[0]
+        gen_text = text[0]
+        # Add space if prompt doesn't end with whitespace and gen doesn't start with it
+        if prompt_text and gen_text and not prompt_text[-1].isspace() and not gen_text[0].isspace():
+            joint_text = prompt_text + " " + gen_text
+        else:
+            joint_text = prompt_text + gen_text
         text_tokens = [
-            self.tokenizer.encode(prompt.text[0], add_special_tokens=False)
-            + self.tokenizer.encode(text[0], add_special_tokens=False)
+            self.tokenizer.encode(joint_text, add_special_tokens=False)
         ]
         input_ids, input_lengths = self._add_bos_eos(
             torch.tensor(text_tokens, device=self.device),
@@ -1272,6 +1290,45 @@ class TadaForCausalLM(LlamaForCausalLM):
             time_len_before = time_len_before[:, :-num_transition_steps]
             time_len_after = time_len_after[:, :-num_transition_steps]
 
+        num_prompt_tokens = prompt_acoustic_features.shape[1]
+        # Token offset: generated tokens start after prompt + transition tokens
+        token_decode_offset = num_prompt_tokens + num_transition_steps - 1
+
+        # Set up E2E streaming: decode audio DURING _generate(), not after
+        streaming_decoder = None
+        streaming_audio_chunks: list[torch.Tensor] = []
+        on_token_ready_cb = None
+        first_token_seen = False
+
+        if on_audio_chunk is not None:
+            streaming_decoder = StreamingDecoder(
+                self.decoder,
+                min_block_frames=3,
+                cnn_window_size=streaming_cnn_window_size,
+            )
+
+            acoustic_std = self.config.acoustic_std
+            acoustic_mean = self.config.acoustic_mean
+
+            def on_token_ready_cb(acoustic_feat: torch.Tensor, time_before_val: torch.Tensor, rel_idx: int):
+                nonlocal first_token_seen
+                # Denormalize acoustic features (normally done after _generate())
+                feat = acoustic_feat * acoustic_std + acoustic_mean
+                tb_val = time_before_val[0].item()  # (batch, 1) -> scalar
+
+                # Skip leading silence on first token.
+                # Clamp to at least 5 frames (100ms) to avoid transition artifacts
+                # when the LLM predicts very short leading silence (1-2 frames).
+                if not first_token_seen:
+                    first_token_seen = True
+                    leading_frames = max(int(tb_val), 5)
+                    streaming_decoder.skip_leading_frames(leading_frames)
+
+                chunk = streaming_decoder.decode_block(feat[0, 0], tb_val)
+                if chunk is not None and chunk.shape[-1] > 0:
+                    streaming_audio_chunks.append(chunk)
+                    on_audio_chunk(chunk, 24000)
+
         outputs: SyncTokGenerationOutput = self._generate(
             input_ids=input_ids,
             text=text,
@@ -1285,20 +1342,44 @@ class TadaForCausalLM(LlamaForCausalLM):
             num_steps=input_ids.shape[-1] + num_extra_steps,
             inference_options=inference_options,
             use_text_in_prompt=use_text_in_prompt,
+            on_token_ready=on_token_ready_cb,
+            on_token_ready_offset=token_decode_offset,
         )
 
-        num_prompt_tokens = prompt_acoustic_features.shape[1]
-        acoustic_features = outputs.acoustic_features * self.config.acoustic_std + self.config.acoustic_mean
+        # Flush streaming decoder after _generate() completes
+        if streaming_decoder is not None:
+            # Flush with trailing frames from the last time_before
+            all_tb = outputs.time_before
+            if all_tb.shape[1] > 0:
+                trailing = all_tb[0, -1].item()
+            else:
+                trailing = 0
+            final_chunk = streaming_decoder.flush(trailing_frames=trailing)
+            if final_chunk is not None and final_chunk.shape[-1] > 0:
+                streaming_audio_chunks.append(final_chunk)
+                on_audio_chunk(final_chunk, 24000)
 
-        encoded = acoustic_features[..., num_prompt_tokens + num_transition_steps - 1 :, :]
-        time_before = outputs.time_before[..., num_prompt_tokens + num_transition_steps - 1 :]
+        acoustic_features = outputs.acoustic_features * self.config.acoustic_std + self.config.acoustic_mean
+        encoded = acoustic_features[..., token_decode_offset:, :]
+        time_before = outputs.time_before[..., token_decode_offset:]
         wavs = []
 
         for i in range(encoded.shape[0]):
             try:
-                wav = self._decode_wav(encoded[i], time_before=time_before[i]).squeeze(0, 1)
-                wav = wav[..., int(24000 * time_before[i][0] / 50) :]  # remove leading silence
-                wavs.append(wav)
+                if on_audio_chunk is not None and streaming_audio_chunks:
+                    # E2E streaming: audio was already emitted during _generate()
+                    if streaming_audio_chunks:
+                        wavs.append(torch.cat(streaming_audio_chunks, dim=-1).squeeze(0))
+                    else:
+                        wavs.append(None)
+                else:
+                    # Non-streaming decode: existing single-pass path
+                    wav = self._decode_wav(encoded[i], time_before=time_before[i]).squeeze(0, 1)
+                    # Trim leading silence. Clamp to at least 5 frames (100ms)
+                    # to avoid transition artifacts when time_before[0] is very small.
+                    min_trim_frames = max(int(time_before[i][0].item()), 5)
+                    wav = wav[..., min_trim_frames * 480 :]
+                    wavs.append(wav)
             except Exception:
                 wavs.append(None)
 

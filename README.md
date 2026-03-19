@@ -1,5 +1,5 @@
 <!-- ---
-license: llama3.2
+license: mit
 language:
   - en
 tags:
@@ -30,6 +30,7 @@ TADA achieves high-fidelity synthesis and generation with a fraction of the comp
 ## Updates
 
 **March 2026**
+- **Streaming audio generation** — `generate(on_audio_chunk=callback)` for end-to-end streaming. Audio chunks are emitted during LLM generation. True TTFA ~350ms on GPU. No retraining needed.
 - Encoder no longer loaded inside `TadaForCausalLM` — saves ~2.5 GB VRAM. Load it separately only when encoding new prompts.
 - Added `EncoderOutput.save()` / `EncoderOutput.load()` for prompt caching — encode once, reuse without the encoder.
 - Default flow matching steps reduced from 20 to 10 (no perceptible quality loss, ~1.3x faster).
@@ -194,6 +195,120 @@ output = model.generate(
 )
 ```
 
+
+### Streaming Audio Generation
+
+By default, `generate()` produces the complete audio after all tokens are generated (non-streaming). To stream audio chunks as they are generated, pass an `on_audio_chunk` callback:
+
+```python
+import torch
+import torchaudio
+
+from tada.modules.encoder import Encoder, EncoderOutput
+from tada.modules.tada import TadaForCausalLM
+
+device = "cuda"
+encoder = Encoder.from_pretrained("HumeAI/tada-codec", subfolder="encoder").to(device)
+model = TadaForCausalLM.from_pretrained("HumeAI/tada-1b", torch_dtype=torch.bfloat16).to(device)
+
+audio, sample_rate = torchaudio.load("samples/ljspeech.wav")
+prompt = encoder(audio.to(device), sample_rate=sample_rate)
+
+# Stream audio chunks as they are generated
+def stream_audio(chunk: torch.Tensor, sample_rate: int):
+    # chunk shape: (num_samples,) at 24kHz
+    # Write to audio buffer, stream to speaker, send over network, etc.
+    print(f"Received {chunk.shape[-1] / sample_rate:.2f}s of audio")
+
+output = model.generate(
+    prompt=prompt,
+    text="Hello, this is a demonstration of streaming text to speech.",
+    on_audio_chunk=stream_audio,
+)
+# output.audio still contains the full concatenated audio
+```
+
+When `on_audio_chunk` is not provided (default), the existing non-streaming path runs unchanged.
+
+#### Application integration
+
+For production applications, connect the callback to your audio pipeline:
+
+```python
+import queue
+
+# Thread-safe audio queue for a web server
+audio_queue = queue.Queue()
+
+def stream_to_queue(chunk: torch.Tensor, sample_rate: int):
+    audio_bytes = (chunk.cpu().numpy() * 32767).astype("int16").tobytes()
+    audio_queue.put(audio_bytes)
+
+output = model.generate(
+    prompt=prompt,
+    text="Hello world",
+    on_audio_chunk=stream_to_queue,
+)
+audio_queue.put(None)  # Signal end of stream
+```
+
+```python
+# Write chunks directly to a WAV file as they arrive
+import soundfile as sf
+
+with sf.SoundFile("output.wav", mode="w", samplerate=24000, channels=1) as f:
+    def stream_to_file(chunk: torch.Tensor, sample_rate: int):
+        f.write(chunk.cpu().numpy())
+
+    output = model.generate(
+        prompt=prompt,
+        text="Hello world",
+        on_audio_chunk=stream_to_file,
+    )
+```
+
+For CPU or memory-constrained devices, reduce the CNN window size:
+
+```python
+output = model.generate(
+    prompt=prompt,
+    text="Hello world",
+    on_audio_chunk=stream_audio,
+    streaming_cnn_window_size=50,  # Default 100. Use 50 for <32GB RAM.
+)
+```
+
+#### How it works
+
+Streaming is end-to-end: audio chunks are emitted **during** LLM generation, not after. As the LLM generates each token, the acoustic features are immediately decoded into audio and delivered via the callback.
+
+The decoder has two stages:
+
+1. **Transformer**: Per-layer KV cache ensures each new token only computes Q and attends to cached K,V. This is bit-exact with the non-streaming path.
+
+2. **CNN (DACDecoder)**: A sliding window (default 100 frames) over accumulated transformer hidden states. The window provides 20 frames of left context and 15 frames of right lookahead for stable output. No model retraining required.
+
+#### Performance
+
+True time-to-first-audio (TTFA) measured from `generate()` call to first audio chunk:
+
+| Model | Device | Text | True TTFA | Total time | Non-streaming |
+|-------|--------|------|-----------|------------|---------------|
+| TADA-1B | GPU (H100) | Short | ~440ms | 0.47s | 0.77s |
+| TADA-1B | GPU (H100) | Medium | ~350ms | 1.06s | 0.86s |
+| TADA-1B | GPU (H100) | Long | ~330ms | 3.02s | 2.47s |
+| TADA-1B | CPU | Short | ~2.3s | 3.2s | 2.9s |
+| TADA-1B | CPU | Long | ~2.1s | 25s | 18s |
+
+Streaming uses less peak memory than non-streaming for medium and long text (up to 3.6 GB less VRAM on GPU).
+
+#### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `on_audio_chunk` | `None` | Callback `(chunk, sample_rate) -> None`. Enables streaming when set. |
+| `streaming_cnn_window_size` | 100 | CNN sliding window size in frames. Use 50 for <32GB RAM. |
+
 ## 📚 Citation
 
 If you use this project in your research, please cite our paper:
@@ -207,25 +322,6 @@ If you use this project in your research, please cite our paper:
 }
 ```
 
-## License
-
-This repository contains both model weights and code, which are licensed separately:
-
-- **Model weights** are licensed under the Llama 3.2 Community License Agreement  
-- **Code** in this repository is licensed under the MIT License  
-
-You must comply with the terms of the Llama 3.2 license when using the models.
-
-See:
-- `LICENSE` for the Llama 3.2 license
-- `LICENSE_CODE` for the MIT license
-
 ## Contact
 
 [Hume AI](https://hume.ai) is an empathic AI research company. We research the datasets, tools, and models needed to give empathy to AI models to serve human wellbeing. If you're interested in any of our product or research collaborations, please reach out to us at hello@hume.ai.
-
-## Acknowledgements
-
-This project is built using Llama 3.2.
-
-Llama 3.2 is licensed under the Llama 3.2 Community License.
