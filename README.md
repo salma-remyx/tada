@@ -1,5 +1,5 @@
 <!-- ---
-license: mit
+license: llama3.2
 language:
   - en
 tags:
@@ -308,6 +308,25 @@ Streaming uses less peak memory than non-streaming for medium and long text (up 
 |-----------|---------|-------------|
 | `on_audio_chunk` | `None` | Callback `(chunk, sample_rate) -> None`. Enables streaming when set. |
 | `streaming_cnn_window_size` | 100 | CNN sliding window size in frames. Use 50 for <32GB RAM. |
+
+## License
+
+This repository contains both model weights and code, which are licensed separately:
+
+- **Model weights** are licensed under the Llama 3.2 Community License Agreement  
+- **Code** in this repository is licensed under the MIT License  
+
+You must comply with the terms of the Llama 3.2 license when using the models.
+
+See:
+- `LICENSE` for the Llama 3.2 license
+- `LICENSE_CODE` for the MIT license
+
+## Acknowledgements
+
+This project is built using Llama 3.2.
+
+Llama 3.2 is licensed under the Llama 3.2 Community License.
 
 ## 📚 Citation
 
