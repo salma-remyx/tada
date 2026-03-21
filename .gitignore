@@ -1,4 +1,6 @@
 weights/
+mlx_weights/
+mlx_weights_*/
 
 __pycache__/
 .pytest_cache/
@@ -9,3 +11,6 @@ dist/
 build/
 PYPI_README.md
 test_encoder_removal.py
+
+*.wav
+*.npz
