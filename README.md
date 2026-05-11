@@ -30,7 +30,7 @@ TADA achieves high-fidelity synthesis and generation with a fraction of the comp
 ## Updates
 
 **March 2026**
-- **Streaming audio generation** — `generate(on_audio_chunk=callback)` for end-to-end streaming. Audio chunks are emitted during LLM generation. True TTFA ~350ms on GPU. No retraining needed.
+- **Streaming audio generation** — `generate(stream=True)` for end-to-end streaming. Audio chunks are yielded during LLM generation. True TTFA ~350ms on GPU. No retraining needed.
 - Encoder no longer loaded inside `TadaForCausalLM` — saves ~2.5 GB VRAM. Load it separately only when encoding new prompts.
 - Added `EncoderOutput.save()` / `EncoderOutput.load()` for prompt caching — encode once, reuse without the encoder.
 - Default flow matching steps reduced from 20 to 10 (no perceptible quality loss, ~1.3x faster).
@@ -198,7 +198,7 @@ output = model.generate(
 
 ### Streaming Audio Generation
 
-By default, `generate()` produces the complete audio after all tokens are generated (non-streaming). To stream audio chunks as they are generated, pass an `on_audio_chunk` callback:
+By default, `generate()` produces the complete audio after all tokens are generated (non-streaming). To stream audio chunks as they are generated, pass `stream=True`:
 
 ```python
 import torch
@@ -215,24 +215,26 @@ audio, sample_rate = torchaudio.load("samples/ljspeech.wav")
 prompt = encoder(audio.to(device), sample_rate=sample_rate)
 
 # Stream audio chunks as they are generated
-def stream_audio(chunk: torch.Tensor, sample_rate: int):
+stream = model.generate(
+    prompt=prompt,
+    text="Hello, this is a demonstration of streaming text to speech.",
+    stream=True,
+)
+for chunk, sample_rate in stream:
     # chunk shape: (num_samples,) at 24kHz
     # Write to audio buffer, stream to speaker, send over network, etc.
     print(f"Received {chunk.shape[-1] / sample_rate:.2f}s of audio")
 
-output = model.generate(
-    prompt=prompt,
-    text="Hello, this is a demonstration of streaming text to speech.",
-    on_audio_chunk=stream_audio,
-)
-# output.audio still contains the full concatenated audio
+# After iteration, stream.result contains the full GenerationOutput
+# (audio field is None since chunks were streamed individually)
+output = stream.result
 ```
 
-When `on_audio_chunk` is not provided (default), the existing non-streaming path runs unchanged.
+When `stream` is not set (default), the existing non-streaming path runs unchanged.
 
 #### Application integration
 
-For production applications, connect the callback to your audio pipeline:
+For production applications, connect the iterator to your audio pipeline:
 
 ```python
 import queue
@@ -240,15 +242,10 @@ import queue
 # Thread-safe audio queue for a web server
 audio_queue = queue.Queue()
 
-def stream_to_queue(chunk: torch.Tensor, sample_rate: int):
+stream = model.generate(prompt=prompt, text="Hello world", stream=True)
+for chunk, sr in stream:
     audio_bytes = (chunk.cpu().numpy() * 32767).astype("int16").tobytes()
     audio_queue.put(audio_bytes)
-
-output = model.generate(
-    prompt=prompt,
-    text="Hello world",
-    on_audio_chunk=stream_to_queue,
-)
 audio_queue.put(None)  # Signal end of stream
 ```
 
@@ -257,30 +254,24 @@ audio_queue.put(None)  # Signal end of stream
 import soundfile as sf
 
 with sf.SoundFile("output.wav", mode="w", samplerate=24000, channels=1) as f:
-    def stream_to_file(chunk: torch.Tensor, sample_rate: int):
+    for chunk, sr in model.generate(prompt=prompt, text="Hello world", stream=True):
         f.write(chunk.cpu().numpy())
-
-    output = model.generate(
-        prompt=prompt,
-        text="Hello world",
-        on_audio_chunk=stream_to_file,
-    )
 ```
 
 For CPU or memory-constrained devices, reduce the CNN window size:
 
 ```python
-output = model.generate(
+stream = model.generate(
     prompt=prompt,
     text="Hello world",
-    on_audio_chunk=stream_audio,
+    stream=True,
     streaming_cnn_window_size=50,  # Default 100. Use 50 for <32GB RAM.
 )
 ```
 
 #### How it works
 
-Streaming is end-to-end: audio chunks are emitted **during** LLM generation, not after. As the LLM generates each token, the acoustic features are immediately decoded into audio and delivered via the callback.
+Streaming is end-to-end: audio chunks are emitted **during** LLM generation, not after. As the LLM generates each token, the acoustic features are immediately decoded into audio and yielded to the caller.
 
 The decoder has two stages:
 
@@ -306,7 +297,7 @@ Streaming uses less peak memory than non-streaming for medium and long text (up 
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `on_audio_chunk` | `None` | Callback `(chunk, sample_rate) -> None`. Enables streaming when set. |
+| `stream` | `False` | When `True`, returns an `AudioStream` iterator yielding `(chunk, sample_rate)` tuples. |
 | `streaming_cnn_window_size` | 100 | CNN sliding window size in frames. Use 50 for <32GB RAM. |
 
 ## License
