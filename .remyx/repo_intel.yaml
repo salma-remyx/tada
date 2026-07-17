@@ -1,0 +1,17 @@
+schema_version: 1
+fork: salma-remyx/tada
+observed_landing_zones:
+- path: tada/quantization/
+  shape_tags:
+  - unclassified
+  confirmed_by:
+  - arxiv: 2309.05516v5
+    mode: Mode 2 (adapted port)
+    call_site_specifics: TadaForCausalLM.from_pretrained (opt-in via the new weight_rounding_bits
+      kwarg) and the public TadaForCausalLM.optimize_weight_rounding() method
+    branch: optimize-weight-rounding-via-signed-gradient-descent-for-the
+    timestamp: '2026-07-17T20:12:02Z'
+  last_observed: '2026-07-17T20:12:02Z'
+rejected_shapes: []
+coordination_signals: []
+last_updated: '2026-07-17T20:12:02Z'
