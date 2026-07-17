@@ -176,6 +176,10 @@ class TadaForCausalLM(LlamaForCausalLM):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *args, **kwargs):
+        # Opt-in weight-only quantization of the Llama backbone via SignRound-style
+        # signed-gradient rounding (arXiv:2309.05516). Popped here so the HF loader ignores them.
+        weight_rounding_bits = kwargs.pop("weight_rounding_bits", None)
+        weight_rounding_seq_len = kwargs.pop("weight_rounding_seq_len", 64)
         self = super().from_pretrained(pretrained_model_name_or_path, *args, **kwargs)
         # Forward kwargs (e.g. low_cpu_mem_usage) to sub-model loading
         sub_kwargs = {k: v for k, v in kwargs.items() if k in ('low_cpu_mem_usage',)}
@@ -183,6 +187,31 @@ class TadaForCausalLM(LlamaForCausalLM):
         # Load tokenizer directly instead of the full Encoder (~1.3GB savings)
         tokenizer_name = getattr(self.config, "tokenizer_name", "meta-llama/Llama-3.2-1B")
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        if weight_rounding_bits is not None:
+            self.optimize_weight_rounding(bits=int(weight_rounding_bits), seq_len=int(weight_rounding_seq_len))
+        return self
+
+    def optimize_weight_rounding(
+        self,
+        bits: int = 4,
+        calibration_ids: torch.LongTensor | None = None,
+        seq_len: int = 64,
+        batch: int = 2,
+        **kwargs,
+    ) -> "TadaForCausalLM":
+        """Apply SignRound weight-only quantization to the Llama backbone Linears.
+
+        Replaces each backbone ``nn.Linear`` with a
+        :class:`~tada.quantization.weight_rounding.QuantizedLinear` whose int8 weights and
+        per-group scale are produced by signed-gradient (SignSGD) optimization of the rounding
+        variable, cutting parameter memory ~4x for the quantized layers. Adapted from
+        SignRound (arXiv:2309.05516); see ``tada.quantization.weight_rounding`` for scope.
+        """
+        from ..quantization.weight_rounding import optimize_model_weight_rounding
+
+        optimize_model_weight_rounding(
+            self, bits=bits, calibration_ids=calibration_ids, seq_len=seq_len, batch=batch, **kwargs
+        )
         return self
 
     @property

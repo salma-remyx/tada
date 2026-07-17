@@ -36,6 +36,9 @@ TADA achieves high-fidelity synthesis and generation with a fraction of the comp
 - bf16 inference support via `torch_dtype=torch.bfloat16` — halves model memory (~9 GB for 3B).
 - `model.compile()` for torch.compile optimization — ~0.12x RTF on H100 with cached prompts.
 
+**July 2026**
+- Optional weight-only int4 quantization of the Llama backbone via `model.optimize_weight_rounding()` (or `from_pretrained(..., weight_rounding_bits=4)`) — SignSGD-optimized rounding stores backbone weights as int8 + per-group scale (~4x parameter memory for the quantized layers). Adapted from SignRound.
+
 ## Key Features
 
 - **1:1 Token Alignment** — The tokenizer encodes audio into a sequence of vectors that perfectly matches the number of text tokens.
