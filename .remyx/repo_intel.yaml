@@ -12,6 +12,12 @@ observed_landing_zones:
     branch: optimize-weight-rounding-via-signed-gradient-descent-for-the
     timestamp: '2026-07-17T20:12:02Z'
   last_observed: '2026-07-17T20:12:02Z'
-rejected_shapes: []
+rejected_shapes:
+- shape_tag: null
+  reason_code: null
+  reason_summary: ''
+  observed:
+  - arxiv: 2312.05693v2
+    timestamp: '2026-07-18T16:24:55Z'
 coordination_signals: []
-last_updated: '2026-07-17T20:12:02Z'
+last_updated: '2026-07-18T16:24:55Z'
