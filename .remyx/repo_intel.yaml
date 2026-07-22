@@ -3,7 +3,7 @@ fork: salma-remyx/tada
 observed_landing_zones:
 - path: tada/quantization/
   shape_tags:
-  - unclassified
+  - library-shape-public-api
   confirmed_by:
   - arxiv: 2309.05516v5
     mode: Mode 2 (adapted port)
@@ -11,7 +11,14 @@ observed_landing_zones:
       kwarg) and the public TadaForCausalLM.optimize_weight_rounding() method
     branch: optimize-weight-rounding-via-signed-gradient-descent-for-the
     timestamp: '2026-07-17T20:12:02Z'
-  last_observed: '2026-07-17T20:12:02Z'
+  - arxiv: 2403.12544v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: "TadaForCausalLM.apply_affine_quantization \u2014 a new method\
+      \ bound to the library's existing primary public model class TadaForCausalLM\
+      \ (the class users build via from_pretrained), delegating into tada.qu"
+    branch: affinequant-affine-transformation-quantization-for-large-lan
+    timestamp: '2026-07-22T12:13:19Z'
+  last_observed: '2026-07-22T12:13:19Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -26,4 +33,4 @@ rejected_shapes:
   - arxiv: 2401.10432v1
     timestamp: '2026-07-21T17:33:50Z'
 coordination_signals: []
-last_updated: '2026-07-21T17:33:50Z'
+last_updated: '2026-07-22T12:13:19Z'
