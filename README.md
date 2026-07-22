@@ -229,3 +229,29 @@ See:
 This project is built using Llama 3.2.
 
 Llama 3.2 is licensed under the Llama 3.2 Community License.
+
+## Optional: Post-Training Weight Quantization
+
+TADA ships an opt-in post-training weight-quantization capability for the Llama
+backbone. It quantizes each backbone `nn.Linear` projection to a low bit-width via
+a per-layer affine pre-quantization transform (adapted from
+[AffineQuant](https://arxiv.org/abs/2403.12544), You et al., 2024), lowering the
+inference memory footprint without retraining.
+
+- **Opt-in and one-time** — no retraining; the flow-matching head is left untouched.
+- An invertible affine matrix is fit per layer to minimize output reconstruction
+  error, then the inverse is folded back so each layer's matmul contract is preserved.
+- The result is never worse than plain round-to-nearest on the calibration set, and
+  reduces error substantially on larger layers.
+
+```python
+import torch
+from tada.modules.tada import TadaForCausalLM
+
+model = TadaForCausalLM.from_pretrained("HumeAI/TADA", subfolder="llm", torch_dtype=torch.bfloat16)
+model.apply_affine_quantization(bits=4)  # quantize the backbone Linear layers in place
+```
+
+See `tada/quantization/affine_weight_quant.py` for the full API (bit-width, real
+calibration activations, and the per-layer width limit above which the full-matrix
+affine optimization falls back to round-to-nearest).

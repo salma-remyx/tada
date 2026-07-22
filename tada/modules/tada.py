@@ -1,7 +1,7 @@
 import math
 import time
 from dataclasses import dataclass, replace
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 import torch
 from transformers import AutoTokenizer, LlamaForCausalLM
@@ -12,6 +12,7 @@ from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.utils.generic import ModelOutput
 
 from ..nn.vibevoice import VibeVoiceDiffusionHead, VibeVoiceDiffusionHeadConfig
+from ..quantization.affine_weight_quant import apply_affine_quantization as _apply_affine_quantization
 from ..utils.gray_code import decode_gray_code_to_time
 from ..utils.text import normalize_text as normalize_text_fn
 from .acoustic_spkr_verf import AcousticSpkrVerf
@@ -208,6 +209,41 @@ class TadaForCausalLM(LlamaForCausalLM):
         self._acoustic_spkr_verf.to(self.device)
         self._acoustic_spkr_verf.eval()
         return self._acoustic_spkr_verf
+
+    def apply_affine_quantization(
+        self,
+        bits: int = 4,
+        *,
+        num_calibration_steps: int = 25,
+        calibration_batch_size: int = 8,
+        learning_rate: float = 5e-3,
+        regularization: float = 1e-3,
+        max_affine_dim: int = 4096,
+        seed: int = 0,
+        calibration_inputs: Optional[Callable[[int], torch.Tensor]] = None,
+    ) -> "TadaForCausalLM":
+        """Apply AffineQuant-style post-training affine weight quantization in place.
+
+        Optimizes a per-``nn.Linear`` affine pre-quantization transform across the
+        Llama backbone projections to reduce weight-quantization output error, then
+        folds the inverse back so each layer's matmul forward contract is preserved.
+        Opt-in and one-time (no retraining); the flow-matching head is left untouched.
+
+        Adapted from AffineQuant (You et al., 2024). See
+        ``tada/quantization/affine_weight_quant.py`` for the Mode 2 substitutions made.
+        """
+        _apply_affine_quantization(
+            self,
+            bits=bits,
+            num_calibration_steps=num_calibration_steps,
+            calibration_batch_size=calibration_batch_size,
+            learning_rate=learning_rate,
+            regularization=regularization,
+            max_affine_dim=max_affine_dim,
+            seed=seed,
+            calibration_inputs=calibration_inputs,
+        )
+        return self
 
     def _lm_head_forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Run lm_head, falling back to CPU for MPS (output channels >65536 unsupported)."""
