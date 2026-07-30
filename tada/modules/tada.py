@@ -209,6 +209,36 @@ class TadaForCausalLM(LlamaForCausalLM):
         self._acoustic_spkr_verf.eval()
         return self._acoustic_spkr_verf
 
+    def apply_activation_guided_quantization(
+        self,
+        input_ids: torch.Tensor,
+        avg_bits: float = 3.0,
+        *,
+        min_bits: int = 2,
+        max_bits: int = 4,
+        group_size: int = 128,
+    ):
+        """Activation-guided mixed-precision post-training weight quantization.
+
+        Profiles the Llama backbone's ``nn.Linear`` layers on ``input_ids`` and
+        allocates each one a bit-width from the measured activation magnitudes
+        under an average-bit budget, then quantizes the weights in place (fake
+        quant). Returns a report with the realized average bit-width and
+        per-layer allocation. See ``tada.quantization.activation_guided``.
+        """
+        from ..quantization.activation_guided import activation_guided_quantize
+
+        # Quantize the inner LlamaModel backbone so only the transformer-block
+        # linears are touched (embeddings, lm_head, and the diffusion head are excluded).
+        return activation_guided_quantize(
+            self.model,
+            input_ids,
+            avg_bits=avg_bits,
+            min_bits=min_bits,
+            max_bits=max_bits,
+            group_size=group_size,
+        )
+
     def _lm_head_forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Run lm_head, falling back to CPU for MPS (output channels >65536 unsupported)."""
         if hidden_states.device.type == "mps":
