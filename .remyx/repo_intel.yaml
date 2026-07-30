@@ -18,7 +18,14 @@ observed_landing_zones:
       \ (the class users build via from_pretrained), delegating into tada.qu"
     branch: affinequant-affine-transformation-quantization-for-large-lan
     timestamp: '2026-07-22T12:13:19Z'
-  last_observed: '2026-07-22T12:13:19Z'
+  - arxiv: 2312.05693v2
+    mode: Mode 2 (adapted port)
+    call_site_specifics: TadaForCausalLM.apply_activation_guided_quantization (new
+      public method on the library's central model class) plus the public tada.quantization
+      package export; no pre-existing script/CLI/notebook call
+    branch: agile-quant-activation-guided-quantization-for-faster-infere
+    timestamp: '2026-07-30T12:07:25Z'
+  last_observed: '2026-07-30T12:07:25Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -37,4 +44,4 @@ rejected_shapes:
   - arxiv: 2411.07191v2
     timestamp: '2026-07-29T20:31:37Z'
 coordination_signals: []
-last_updated: '2026-07-29T20:31:37Z'
+last_updated: '2026-07-30T12:07:25Z'
