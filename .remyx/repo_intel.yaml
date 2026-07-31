@@ -25,7 +25,14 @@ observed_landing_zones:
       package export; no pre-existing script/CLI/notebook call
     branch: agile-quant-activation-guided-quantization-for-faster-infere
     timestamp: '2026-07-30T12:07:25Z'
-  last_observed: '2026-07-30T12:07:25Z'
+  - arxiv: 2405.00632v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: "`TadaForCausalLM.measure_quantization_confidence()` \u2014\
+      \ a public method on the library's main model class; reachable as library API\
+      \ (documented in README, exercised by `confidence_calibration_test.py`),"
+    branch: when-quantization-affects-confidence-of-large-language-model
+    timestamp: '2026-07-31T18:35:50Z'
+  last_observed: '2026-07-31T18:35:50Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -44,4 +51,4 @@ rejected_shapes:
   - arxiv: 2411.07191v2
     timestamp: '2026-07-31T03:02:44Z'
 coordination_signals: []
-last_updated: '2026-07-31T03:02:44Z'
+last_updated: '2026-07-31T18:35:50Z'
