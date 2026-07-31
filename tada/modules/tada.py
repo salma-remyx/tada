@@ -12,6 +12,7 @@ from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.utils.generic import ModelOutput
 
 from ..nn.vibevoice import VibeVoiceDiffusionHead, VibeVoiceDiffusionHeadConfig
+from ..quantization.confidence_calibration import ConfidenceShiftReport, measure_confidence_shift
 from ..utils.gray_code import decode_gray_code_to_time
 from ..utils.text import normalize_text as normalize_text_fn
 from .acoustic_spkr_verf import AcousticSpkrVerf
@@ -1353,3 +1354,29 @@ class TadaForCausalLM(LlamaForCausalLM):
     def to(self, device: str):
         self.decoder.to(device)
         return super().to(device)
+
+    def measure_quantization_confidence(
+        self,
+        input_ids: torch.LongTensor,
+        *,
+        bits: int = 8,
+        labels: torch.LongTensor | None = None,
+        n_bins: int = 15,
+        attention_mask: torch.LongTensor | None = None,
+    ) -> ConfidenceShiftReport:
+        """Measure how low-bit weight quantization shifts token confidence/calibration.
+
+        Runs a reference forward pass over ``input_ids``, RTN-fake-quantizes the
+        backbone's ``nn.Linear`` weights to ``bits`` bits, runs a second pass, and
+        returns the shift in mean confidence, predictive entropy, top-1 agreement
+        and (when ``labels`` is given) expected calibration error. Weights are
+        restored exactly on exit. See :mod:`tada.quantization.confidence_calibration`.
+        """
+        return measure_confidence_shift(
+            self,
+            input_ids,
+            bits=bits,
+            labels=labels,
+            n_bins=n_bins,
+            attention_mask=attention_mask,
+        )

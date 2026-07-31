@@ -42,6 +42,7 @@ TADA achieves high-fidelity synthesis and generation with a fraction of the comp
 - **Dynamic Duration Synthesis** — Generates the full speech segment for a text token in a single autoregressive step, regardless of length.
 - **Dual-Stream Generation** — Generates a text token and the speech for the preceding token simultaneously, maintaining the same context length as text-only generation.
 - **Efficiency & Reliability** — Superior expressiveness and natural flow while significantly reducing computational cost.
+- **Quantization Confidence Diagnostics** — `TadaForCausalLM.measure_quantization_confidence()` reports how low-bit weight quantization shifts token confidence, predictive entropy, top-1 agreement and expected calibration error.
 
 ## How It Works
 
