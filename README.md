@@ -35,6 +35,7 @@ TADA achieves high-fidelity synthesis and generation with a fraction of the comp
 - Default flow matching steps reduced from 20 to 10 (no perceptible quality loss, ~1.3x faster).
 - bf16 inference support via `torch_dtype=torch.bfloat16` — halves model memory (~9 GB for 3B).
 - `model.compile()` for torch.compile optimization — ~0.12x RTF on H100 with cached prompts.
+- Added `dense_jump` flow-matching time schedule (opt-in via `InferenceOptions(time_schedule="dense_jump")`) — concentrates Euler steps in the stable region and takes a single jump to t=1, mitigating the multi-step inference degradation of Dense-Jump Flow Matching (arXiv:2509.13574).
 
 ## Key Features
 

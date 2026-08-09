@@ -12,6 +12,7 @@ from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.utils.generic import ModelOutput
 
 from ..nn.vibevoice import VibeVoiceDiffusionHead, VibeVoiceDiffusionHeadConfig
+from ..utils.dense_jump_schedule import build_dense_jump_schedule
 from ..utils.gray_code import decode_gray_code_to_time
 from ..utils.text import normalize_text as normalize_text_fn
 from .acoustic_spkr_verf import AcousticSpkrVerf
@@ -31,7 +32,8 @@ class InferenceOptions:
     cfg_schedule: Literal["constant", "linear", "cosine"] = "cosine"
     noise_temperature: float = 0.9
     num_flow_matching_steps: int = 10
-    time_schedule: Literal["uniform", "cosine", "logsnr"] = "logsnr"
+    time_schedule: Literal["uniform", "cosine", "logsnr", "dense_jump"] = "logsnr"
+    time_schedule_jump_point: float = 0.75
     num_acoustic_candidates: int = 1
     scorer: Literal["spkr_verification", "likelihood", "duration_median"] = "likelihood"
     spkr_verification_weight: float = 1.0
@@ -389,20 +391,31 @@ class TadaForCausalLM(LlamaForCausalLM):
         return base_scale
 
     @staticmethod
-    def _build_time_schedule(num_steps: int, schedule: str, device: torch.device) -> torch.Tensor:
+    def _build_time_schedule(
+        num_steps: int,
+        schedule: str,
+        device: torch.device,
+        jump_point: float | None = None,
+    ) -> torch.Tensor:
         """Build a time schedule for ODE discretization.
 
         Args:
             num_steps: Number of ODE steps.
-            schedule: One of "uniform", "cosine", "logsnr".
+            schedule: One of "uniform", "cosine", "logsnr", "dense_jump".
                 - uniform: evenly spaced in [0, 1] (original behavior).
                 - cosine:  denser near t=0 and t=1 where velocity changes fastest.
                 - logsnr:  spaced uniformly in log-SNR space, concentrating steps
                            near t=0 (denoising onset) where accuracy matters most.
+                - dense_jump: (num_steps - 1) uniform steps in [0, jump_point] then a
+                           single jump to t=1, avoiding the unstable late-time region.
+            jump_point: Endpoint of the dense region for "dense_jump", in (0, 1).
+                Ignored for other schedules. Defaults to 0.75.
 
         Returns:
             Tensor of shape (num_steps + 1,) with values in [0, 1].
         """
+        if schedule == "dense_jump":
+            return build_dense_jump_schedule(num_steps, jump_point, device)
         if schedule == "cosine":
             # t = 0.5 * (1 - cos(π * u))  where u is uniform in [0, 1]
             u = torch.linspace(0, 1, num_steps + 1, device=device)
@@ -430,6 +443,7 @@ class TadaForCausalLM(LlamaForCausalLM):
         duration_cfg_scale: float,
         cfg_schedule: str = "constant",
         time_schedule: str = "uniform",
+        time_schedule_jump_point: float | None = None,
         forced_time_before: torch.Tensor | None = None,
         forced_time_after: torch.Tensor | None = None,
     ) -> torch.Tensor:
@@ -450,6 +464,8 @@ class TadaForCausalLM(LlamaForCausalLM):
                 "uniform" — evenly spaced (original behavior).
                 "cosine"  — denser near t=0 and t=1.
                 "logsnr"  — uniform in log-SNR space, denser near t=0.
+                "dense_jump" — (num_steps - 1) uniform steps in
+                    [0, time_schedule_jump_point] then a single jump to t=1.
             forced_time_before: Optional gray code bit vector for time_before (batch, num_time_bits).
                 When provided, replaces time_before slots with the noised interpolant at each step.
             forced_time_after: Optional gray code bit vector for time_after (batch, num_time_bits).
@@ -458,7 +474,7 @@ class TadaForCausalLM(LlamaForCausalLM):
         Returns:
             Final speech state after ODE solving
         """
-        t_span = self._build_time_schedule(num_steps, time_schedule, cond.device)
+        t_span = self._build_time_schedule(num_steps, time_schedule, cond.device, jump_point=time_schedule_jump_point)
         t_curr = t_span[0]
 
         has_forced_time = forced_time_before is not None or forced_time_after is not None
@@ -594,6 +610,7 @@ class TadaForCausalLM(LlamaForCausalLM):
             duration_cfg_scale=opts.duration_cfg_scale,
             cfg_schedule=opts.cfg_schedule,
             time_schedule=opts.time_schedule,
+            time_schedule_jump_point=opts.time_schedule_jump_point,
         )
 
         speech_candidates = speech_flat.view(num_candidates, batch_size, total_dim)
@@ -999,6 +1016,7 @@ class TadaForCausalLM(LlamaForCausalLM):
                     duration_cfg_scale=opts.duration_cfg_scale,
                     cfg_schedule=opts.cfg_schedule,
                     time_schedule=opts.time_schedule,
+                    time_schedule_jump_point=opts.time_schedule_jump_point,
                 )
 
             # Extract time_len_before and time_len_after from flow matching output
