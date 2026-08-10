@@ -15,8 +15,8 @@ name: Outrider daily (branch-mode, drafter)
 # is the single-vendor default for onboarding simplicity).
 
 on:
-  # schedule:  # disabled - serial dispatcher drives workflow_dispatch
-    # - cron: '0 6 * * *'   # daily 06:00 UTC; adjust cadence to workload
+  schedule:
+    - cron: '0 6 * * *'   # daily 06:00 UTC; adjust cadence to workload
   workflow_dispatch: {}
 
 concurrency:
@@ -32,16 +32,15 @@ jobs:
       issues: write
     env:
       REMYX_API_KEY: ${{ secrets.REMYX_API_KEY }}
-      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ZAI_API_KEY }}
-      ANTHROPIC_MODEL: glm-5.2
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.MOONSHOT_API_KEY }}
+      ANTHROPIC_MODEL: kimi-k3
     steps:
       - uses: actions/checkout@v4
       - uses: remyxai/outrider@v1
         with:
           interest-id: 'bcc9dab8-821d-4d42-b82d-22a1319fc33b'
           publish: branch
-          claude-timeout: 2700
-          model-base-url: https://api.z.ai/api/anthropic
+          model-base-url: https://api.moonshot.ai/anthropic
           # Drafter's distinctive defaults: accumulate intel, skip the
           # research phase. Research is proportionate for the refiner
           # (~$1-2 per dispatch, weekly cadence) but wastes cost at the
