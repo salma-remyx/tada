@@ -45,6 +45,16 @@ observed_landing_zones:
     branch: dense-jump-flow-matching-with-non-uniform-time-scheduling-fo
     timestamp: '2026-08-09T12:25:23Z'
   last_observed: '2026-08-09T12:25:23Z'
+- path: tada/eval/
+  shape_tags:
+  - unclassified
+  confirmed_by:
+  - arxiv: 2508.02018v1
+    mode: ''
+    call_site_specifics: ''
+    branch: speechr-a-benchmark-for-speech-reasoning-in-large-audio-lang
+    timestamp: '2026-08-13T09:45:38Z'
+  last_observed: '2026-08-13T09:45:38Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -65,4 +75,4 @@ rejected_shapes:
   - arxiv: 2607.28166v1
     timestamp: '2026-08-01T23:40:10Z'
 coordination_signals: []
-last_updated: '2026-08-10T05:24:45Z'
+last_updated: '2026-08-13T09:45:38Z'
