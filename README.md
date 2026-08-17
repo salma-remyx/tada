@@ -35,6 +35,7 @@ TADA achieves high-fidelity synthesis and generation with a fraction of the comp
 - Default flow matching steps reduced from 20 to 10 (no perceptible quality loss, ~1.3x faster).
 - bf16 inference support via `torch_dtype=torch.bfloat16` — halves model memory (~9 GB for 3B).
 - `model.compile()` for torch.compile optimization — ~0.12x RTF on H100 with cached prompts.
+- Opt-in reduced matmuls via `model.enable_reduced_matmul(retention=0.75)` — training-free, input-adaptive slice selection that shrinks backbone attention matmuls while leaving weights and output shapes untouched. `model.reduced_matmul_stats()` reports the FLOPs fraction spent; `model.disable_reduced_matmul()` restores the exact path.
 
 ## Key Features
 

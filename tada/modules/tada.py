@@ -11,6 +11,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast as CausalLMOutp
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.utils.generic import ModelOutput
 
+from ..accel.reduced_matmul import apply_reduced_matmul, reduced_matmul_stats, restore_full_matmul
 from ..nn.vibevoice import VibeVoiceDiffusionHead, VibeVoiceDiffusionHeadConfig
 from ..utils.gray_code import decode_gray_code_to_time
 from ..utils.text import normalize_text as normalize_text_fn
@@ -1344,6 +1345,35 @@ class TadaForCausalLM(LlamaForCausalLM):
     @property
     def num_eos_tokens(self):
         return self.config.shift_acoustic
+
+    def enable_reduced_matmul(
+        self, retention: float = 0.75, components: Literal["attention", "mlp", "all"] = "attention"
+    ) -> list[str]:
+        """Reduce backbone matmuls at inference (training-free).
+
+        Wraps the backbone's projection linears so each product keeps only the
+        top-``retention`` fraction of contraction-dim slices selected from the
+        current activations. Weights, state-dict keys, and the
+        ``inputs_embeds -> last_hidden_state`` contract are untouched;
+        ``retention=1.0`` is an exact pass-through that still records stats.
+
+        Args:
+            retention: Fraction of input channels kept per matmul, in (0, 1].
+            components: "attention" (q/k/v/o, the most reducible per the paper),
+                "mlp", or "all".
+
+        Returns:
+            The replaced module paths.
+        """
+        return apply_reduced_matmul(self.model, retention=retention, components=components)
+
+    def disable_reduced_matmul(self) -> list[str]:
+        """Restore the original backbone linears after ``enable_reduced_matmul``."""
+        return restore_full_matmul(self.model)
+
+    def reduced_matmul_stats(self) -> dict[str, dict]:
+        """Per-module and total FLOPs counters since the last enable/forward."""
+        return reduced_matmul_stats(self.model)
 
     def compile(self):
         self.model.forward = torch.compile(self.model.forward)
