@@ -55,6 +55,18 @@ observed_landing_zones:
     branch: speechr-a-benchmark-for-speech-reasoning-in-large-audio-lang
     timestamp: '2026-08-13T09:45:38Z'
   last_observed: '2026-08-13T09:45:38Z'
+- path: tada/accel/
+  shape_tags:
+  - library-shape-public-api
+  confirmed_by:
+  - arxiv: 2608.13426v1
+    mode: Mode 2 (adapted port)
+    call_site_specifics: New opt-in public methods on TadaForCausalLM (enable_reduced_matmul
+      / disable_reduced_matmul / reduced_matmul_stats, tada/modules/tada.py:1349-1376),
+      the same class external users instantiate via Tada
+    branch: reduced-matrix-multiplication-input-adaptive-matrix-product-
+    timestamp: '2026-08-17T21:38:03Z'
+  last_observed: '2026-08-17T21:38:03Z'
 rejected_shapes:
 - shape_tag: null
   reason_code: null
@@ -75,4 +87,4 @@ rejected_shapes:
   - arxiv: 2607.28166v1
     timestamp: '2026-08-01T23:40:10Z'
 coordination_signals: []
-last_updated: '2026-08-13T09:45:38Z'
+last_updated: '2026-08-17T21:38:03Z'
